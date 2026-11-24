@@ -64,6 +64,18 @@ struct Profile: Codable {
         return Int((Double(lo.output) + progress * Double(hi.output - lo.output)).rounded())
     }
 
+    mutating func rememberOffset(at input: Int) -> Point? {
+        guard var adjustment, adjustment.offset != 0 else { return nil }
+        let point = Point(input: input, output: adjustment.apply(to: target(input)))
+        var updated = self
+        if updated.points.isEmpty, let baseline { updated.points = [baseline] }
+        guard updated.add(point) else { return nil }
+        adjustment.offset = 0
+        updated.adjustment = adjustment
+        self = updated
+        return point
+    }
+
     mutating func add(_ point: Point) -> Bool {
         var candidate = points.filter { $0.input != point.input }
         candidate.append(point)
@@ -95,6 +107,7 @@ struct Profile: Codable {
     private(set) var comparisonVisible = false
     var busy: String?
     var message: String?
+    private(set) var learningMessage: [String: String] = [:]
     var loginStatus = SMAppService.mainApp.status
     var loginError: String?
     private let defaults = UserDefaults.standard
@@ -160,8 +173,32 @@ struct Profile: Codable {
 
     func setAdjustment(_ id: String, _ adjustment: BrightnessAdjustment) {
         var profile = profile(id)
+        if profile.adjustment?.offset != adjustment.offset { learningMessage[id] = nil }
         profile.adjustment = adjustment
         save(profile, for: id)
+    }
+
+    func canRememberOffset(_ id: String) -> Bool {
+        let profile = profile(id)
+        let adjustment = adjustment(id)
+        guard adjustment.offset != 0, !paused, profile.enabled, holds[id] == nil,
+              calibrating != id, busy != id, let source,
+              case let .ready(value) = links[id] else { return false }
+        let original = profile.target(source)
+        let adjustedRaw = value.rawValue(for: adjustment.apply(to: original))
+        let unadjusted = min(adjustment.maximum, max(adjustment.minimum, original))
+        return adjustedRaw == value.raw && adjustedRaw != value.rawValue(for: unadjusted)
+    }
+
+    func rememberOffset(_ id: String) {
+        guard canRememberOffset(id), let source, Hardware.snapshot().source == source else { return }
+        var profile = profile(id)
+        guard let point = profile.rememberOffset(at: source) else {
+            learningMessage[id] = "这个微调与附近校准点冲突。请减小微调幅度，或在校准中修改对应的点。"
+            return
+        }
+        save(profile, for: id)
+        learningMessage[id] = "已记住：内屏 \(point.input)% → 外屏 \(point.output)%"
     }
 
     func hold(_ id: String, minutes: Int?) {

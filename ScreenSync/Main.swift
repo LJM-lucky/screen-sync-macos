@@ -77,12 +77,21 @@ struct QuickPanel: View {
                             }
                             .disabled(model.paused || !model.profile(display.id).enabled ||
                                       model.holds[display.id] != nil || model.calibrating == display.id)
+                            if model.adjustment(display.id).offset != 0 {
+                                RememberOffsetButton(model: model, id: display.id)
+                            }
+                            if let message = model.learningMessage[display.id] {
+                                Text(message).font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                         .font(.callout)
                     }
                 }
             }
-            .frame(height: CGFloat(min(model.displays.count, 4)) * 54)
+            .frame(height: min(230, model.displays.reduce(CGFloat(0)) { height, display in
+                height + 54 + (model.adjustment(display.id).offset != 0 ? 30 : 0)
+                    + (model.learningMessage[display.id] == nil ? 0 : 42)
+            }))
             Button {
                 openWindow(id: "settings")
                 NSApp.activate()
@@ -321,6 +330,10 @@ struct DisplayDetail: View {
                         }
                         Text("\(signedOffset(adjustment.offset)) 格").monospacedDigit()
                             .frame(width: 48, alignment: .trailing)
+                        RememberOffsetButton(model: model, id: display.id)
+                    }
+                    if let message = model.learningMessage[display.id] {
+                        Text(message).font(.callout).foregroundStyle(.secondary)
                     }
                     HStack {
                         Stepper(value: Binding(get: { adjustment.minimum }, set: setMinimum),
@@ -416,6 +429,17 @@ struct DisplayDetail: View {
         .confirmationDialog("删除此屏的全部校准点？", isPresented: $showingReset) {
             Button("重置曲线", role: .destructive) { model.resetCurve(display.id) }
         }
+    }
+}
+
+private struct RememberOffsetButton: View {
+    let model: SyncModel
+    let id: String
+    var body: some View {
+        Button("记住这次微调") { model.rememberOffset(id) }
+            .buttonStyle(.glass)
+            .disabled(!model.canRememberOffset(id))
+            .help("将当前亮度组合存为此屏的校准点，再把全局微调归零。外屏达到目标亮度后可保存。")
     }
 }
 
